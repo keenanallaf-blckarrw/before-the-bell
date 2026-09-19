@@ -88,9 +88,23 @@
       s += String.fromCharCode.apply(null, bytes.subarray(k, k + CH));
     }
 
+    var target = SITE + "#import=" + btoa(s);
     say("Found " + items.length + " items — opening your tracker…");
+
+    /* A blocked popup shouldn't lose the pull: offer a link instead, since
+       clicking it is the user gesture the browser wanted. */
+    if (!window.open(target, "_blank")) {
+      box.textContent = "Found " + items.length + " items. ";
+      var a = document.createElement("a");
+      a.href = target;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = "Open your tracker →";
+      a.style.cssText = "color:#fff;font-weight:600;text-decoration:underline";
+      box.appendChild(a);
+      return;
+    }
     setTimeout(function () { box.remove(); }, 4000);
-    window.open(SITE + "#import=" + btoa(s), "_blank");
   } catch (err) {
     box.style.background = "#A33A1C";
     say("Couldn't read Canvas: " + err.message + ". Make sure you're signed in, then try again.");
