@@ -22,6 +22,18 @@ Any static host serves it as-is. For GitHub Pages: push this folder to a repo,
 then Settings → Pages → Source: *Deploy from a branch*, branch `main`, folder
 `/ (root)`.
 
+## Importing from Canvas
+
+**Import** takes the `.ics` file from a Canvas calendar feed (Calendar → Calendar
+Feed) and fills in courses, assignment names and due dates. Re-importing later
+matches on each event's `UID`, so items are updated in place — dates move,
+checkmarks and any prep steps you added by hand survive, and nothing duplicates.
+
+Canvas does *not* send CORS headers on either its REST API or its calendar feed,
+so a website cannot fetch from Canvas directly, whatever host it sits on. Reading
+a local file is the way around that. The export carries titles and due dates
+only; readings, videos and problem sets have to be added as prep steps.
+
 ## Where the data lives
 
 In each visitor's own browser (`localStorage`) — nothing is uploaded and nothing
