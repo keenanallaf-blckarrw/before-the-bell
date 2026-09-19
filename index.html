@@ -369,6 +369,22 @@
     color: var(--accent); font: inherit; text-decoration: underline; text-underline-offset: 2px;
   }
   .link-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  .opt { margin-bottom: 22px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+  .opt:last-of-type { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+  .opt-title {
+    font-family: var(--display); font-weight: 700; font-size: 15px;
+    letter-spacing: -.01em; margin: 0 0 10px;
+  }
+  .bm-wrap { margin: 10px 0 4px; }
+  .bookmarklet {
+    display: inline-block; cursor: grab;
+    background: var(--accent); color: var(--surface);
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600; letter-spacing: .02em;
+    text-decoration: none; padding: 8px 15px; border-radius: 8px;
+    box-shadow: var(--shadow);
+  }
+  .bookmarklet:active { cursor: grabbing; }
+  .bookmarklet:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .paste-wrap { margin-top: 14px; }
   .paste-wrap summary {
     cursor: pointer; font-family: var(--mono); font-size: 11px;
@@ -573,11 +589,25 @@
     <h2 class="dlg-title">Import from Canvas</h2>
   </div>
   <div class="dlg-body">
-    <ol class="steps">
-      <li>In Canvas, open <strong>Calendar</strong> and click <strong>Calendar Feed</strong> in the right sidebar.</li>
-      <li>Open that link in a new tab — your browser downloads a <code>.ics</code> file.</li>
-      <li>Drop the file below.</li>
-    </ol>
+    <section class="opt" id="opt-bm" hidden>
+      <h3 class="opt-title">One click — everything</h3>
+      <ol class="steps">
+        <li>Drag this button up to your bookmarks bar:
+          <div class="bm-wrap"><a class="bookmarklet" id="bm-link" href="#" draggable="true">Sync my Canvas</a></div>
+        </li>
+        <li>Open Canvas and sign in as normal.</li>
+        <li>Click the bookmark. Your tracker opens with everything filled in.</li>
+      </ol>
+      <p class="hint">Pulls courses, assignments, due dates <em>and</em> prep pages — the readings, videos and problem sets owed before each class. It runs on Canvas's own page using your existing login, so there's no password or access token to hand over, and your assignments travel in the link itself rather than through any server.</p>
+    </section>
+
+    <section class="opt">
+      <h3 class="opt-title">Or import a calendar file</h3>
+      <ol class="steps">
+        <li>In Canvas, open <strong>Calendar</strong> and click <strong>Calendar Feed</strong> in the right sidebar.</li>
+        <li>Open that link in a new tab — your browser downloads a <code>.ics</code> file.</li>
+        <li>Drop the file below.</li>
+      </ol>
 
     <div class="drop" id="drop">
       <p class="drop-main">Drop your <code>.ics</code> file here</p>
@@ -591,10 +621,13 @@
       <button class="btn" type="button" id="btn-parse-paste" style="margin-top:8px">Import pasted text</button>
     </details>
 
+    <p class="hint">A calendar export carries assignment names and due dates only — no prep detail. Add those as prep steps yourself, or use the one-click sync above.</p>
+    </section>
+
     <p class="err" id="import-err" hidden></p>
     <p class="ok" id="import-ok" hidden></p>
 
-    <p class="hint">Canvas calendars carry assignment names and due dates. Readings, videos and problem sets aren't in the export — add those as prep steps on the item afterwards. Re-importing later updates what changed and keeps everything you've ticked off.</p>
+    <p class="hint">Either way, re-importing later updates what changed and keeps everything you've ticked off.</p>
   </div>
   <div class="dlg-foot">
     <div class="spacer"></div>
@@ -1247,6 +1280,193 @@
     dlgCourses.showModal();
   });
 
+  /* ---------- one-click Canvas import (via the bookmarklet) ---------- */
+
+  var PREP_PATTERNS = [
+    [/^(?:required\s+)?readings?\s*[:\-]/i, "Reading"],
+    [/^videos?\s*[:\-]/i, "Video"],
+    /* "View 4 videos:", "Required Brainshark Video", "Watch the video" */
+    [/^(?:view|watch|required)\b[^:\n]{0,24}videos?\b/i, "Video"],
+    [/^(?:problem\s+sets?|assignments?(?:\s+to\s+be\s+prepared[^:]*)?)\s*[:\-]/i, "Problem set"],
+    [/^(?:prepare|complete|bring|review)\b/i, "Prepare"],
+    [/^(?:notes?|case)\s*[:\-]/i, "Notes"]
+  ];
+
+  var PREP_START = /for\s+class[,\s]*prepare|prepare\s+the\s+following|before\s+class|to\s+prepare/i;
+  var INCLASS_START = /^in[\s\-]?class\b/i;
+
+  /* Prep pages are free-form HTML a professor wrote, so this reads the shape most
+     of them share: a "prepare the following" run, then an "in class" run. */
+  function parsePrepBody(text) {
+    if (!text) return { prep: [], inClass: "" };
+    var lines = String(text).split("\n").map(function (l) { return l.trim(); })
+      .filter(function (l) { return l && l.length < 400; });
+
+    var prep = [], inClass = [], mode = "";
+    var lastType = null;
+
+    lines.forEach(function (line) {
+      if (INCLASS_START.test(line)) {
+        mode = "in";
+        var rest = line.replace(/^in[\s\-]?class\s*[:\-]?\s*/i, "").trim();
+        if (rest) inClass.push(rest);
+        return;
+      }
+      if (/^learning\s+objectives?/i.test(line)) { mode = ""; return; }
+      /* Only treat "…before class:" as a section header while we're still
+         outside the prep run — inside it, such a line is a step of its own. */
+      if (mode !== "prep" && PREP_START.test(line)) { mode = "prep"; lastType = null; return; }
+
+      if (mode === "in") { inClass.push(line); return; }
+      if (mode !== "prep") return;
+
+      for (var i = 0; i < PREP_PATTERNS.length; i++) {
+        if (PREP_PATTERNS[i][0].test(line)) {
+          var label = PREP_PATTERNS[i][1];
+          /* "Assignments:" on its own is a heading — leave it empty and let the
+             line below become its text. */
+          prep.push({ t: label, d: line.replace(/^[^:\-]{0,40}[:\-]\s*/, "").trim() });
+          lastType = label;
+          return;
+        }
+      }
+      /* A bare continuation line belongs to the step above it. */
+      if (lastType && prep.length) {
+        var last = prep[prep.length - 1];
+        last.d = last.d ? last.d + " · " + line : line;
+      } else {
+        prep.push({ t: "Prepare", d: line });
+        lastType = "Prepare";
+      }
+    });
+
+    return {
+      prep: prep.filter(function (p) { return p.d; }).slice(0, 8).map(function (p) {
+        return { t: p.t, d: p.d.replace(/\s{2,}/g, " ").slice(0, 200) };
+      }),
+      inClass: inClass.join(" · ").slice(0, 240)
+    };
+  }
+
+  function kindFor(title, type) {
+    if (type === "wiki_page") return "prep";
+    if (/\b(midterm|final)\b|\bexam\b/i.test(title)) return "exam";
+    if (/during class|in[\s-]?class/i.test(title)) return "live";
+    return "due";
+  }
+
+  function importPayload(payload) {
+    if (!payload || !Array.isArray(payload.items)) throw new Error("bad payload");
+
+    if (state.sample) {
+      state = { sample: false, courses: [], items: [], checked: {} };
+      filter = "all";
+    }
+
+    var courseNames = {};
+    (payload.courses || []).forEach(function (c) { courseNames[c.id] = c; });
+
+    var byCode = {};
+    state.courses.forEach(function (c) { byCode[(c.code || "").toUpperCase()] = c; });
+    var byExt = {};
+    state.items.forEach(function (i) { if (i.ext) byExt[i.ext] = i; });
+
+    var added = 0, updated = 0, madeCourses = 0, withPrep = 0;
+
+    payload.items.forEach(function (raw) {
+      if (!raw.title || !raw.date) return;
+      var d = new Date(raw.date);
+      if (isNaN(d)) return;
+
+      var meta = courseNames[raw.courseId] || {};
+      var code = shortCode(meta.code || meta.name || "CANVAS");
+      var course = byCode[code];
+      if (!course) {
+        course = {
+          id: uid(), code: code,
+          name: (meta.name || "Canvas").replace(/^\d{4}[A-Z]-\d+:/i, "").trim() || code,
+          hue: HUES[state.courses.length % HUES.length]
+        };
+        state.courses.push(course);
+        byCode[code] = course;
+        madeCourses++;
+      }
+
+      var parsed = raw.type === "wiki_page" ? parsePrepBody(raw.body) : { prep: [], inClass: "" };
+      if (parsed.prep.length) withPrep++;
+
+      var fields = {
+        courseId: course.id,
+        kind: kindFor(raw.title, raw.type),
+        date: d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()),
+        time: pad2(d.getHours()) + ":" + pad2(d.getMinutes()),
+        title: raw.title,
+        points: Number(raw.points) || 0,
+        url: raw.url || "",
+        ext: raw.ext || ""
+      };
+
+      var existing = fields.ext ? byExt[fields.ext] : null;
+      if (existing) {
+        existing.title = fields.title;
+        existing.date = fields.date;
+        existing.time = fields.time;
+        existing.points = fields.points || existing.points;
+        existing.url = fields.url || existing.url;
+        /* Only fill prep in if the student hasn't written their own. */
+        if (parsed.prep.length && !(existing.prep && existing.prep.length)) {
+          existing.prep = parsed.prep;
+        }
+        if (parsed.inClass && !existing.inClass) existing.inClass = parsed.inClass;
+        updated++;
+      } else {
+        fields.id = uid();
+        fields.prep = parsed.prep;
+        fields.inClass = parsed.inClass;
+        state.items.push(fields);
+        if (fields.ext) byExt[fields.ext] = fields;
+        added++;
+      }
+    });
+
+    save();
+    render();
+    return { added: added, updated: updated, courses: madeCourses, withPrep: withPrep };
+  }
+
+  function b64decode(s) {
+    var bin = atob(s);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+
+  /* The bookmarklet hands data over in the URL fragment, which never leaves the
+     browser — the assignments are not sent to whoever hosts this page. */
+  function consumeHashImport() {
+    var h = location.hash || "";
+    var m = h.match(/[#&]import=([A-Za-z0-9+/=]+)/);
+    if (!m) return;
+    history.replaceState(null, "", location.pathname + location.search);
+    var res;
+    try {
+      res = importPayload(JSON.parse(b64decode(m[1])));
+    } catch (e) {
+      importErr.textContent = "That import link couldn't be read. Run the bookmarklet from Canvas again.";
+      importErr.hidden = false;
+      dlgImport.showModal();
+      return;
+    }
+    var parts = [];
+    if (res.added) parts.push(res.added + (res.added === 1 ? " item added" : " items added"));
+    if (res.updated) parts.push(res.updated + " updated");
+    if (res.courses) parts.push(res.courses + (res.courses === 1 ? " course" : " courses"));
+    if (res.withPrep) parts.push(res.withPrep + " with prep steps");
+    importOk.textContent = "Imported from Canvas: " + (parts.join(", ") || "nothing new") + ".";
+    importOk.hidden = false;
+    dlgImport.showModal();
+  }
+
   /* ---------- Canvas .ics import ---------- */
   var dlgImport = document.getElementById("dlg-import");
   var importErr = document.getElementById("import-err");
@@ -1495,7 +1715,28 @@
   });
   document.getElementById("form-item").addEventListener("submit", function (e) { e.preventDefault(); });
 
+  /* The bookmarklet is built from its own file so improving it never means
+     asking anyone to re-drag the bookmark. Absent (e.g. opened as a bare file),
+     the section stays hidden and the calendar import still works. */
+  (function wireBookmarklet() {
+    var link = document.getElementById("bm-link");
+    if (!link) return;
+    fetch("bookmarklet.js")
+      .then(function (r) { return r.ok ? r.text() : Promise.reject(new Error("missing")); })
+      .then(function (src) {
+        link.href = "javascript:" + encodeURIComponent(src);
+        document.getElementById("opt-bm").hidden = false;
+        link.addEventListener("click", function (e) {
+          e.preventDefault();
+          importErr.textContent = "Drag this button up to your bookmarks bar rather than clicking it — it has to run on your Canvas tab.";
+          importErr.hidden = false;
+        });
+      })
+      .catch(function () { /* leave the section hidden */ });
+  })();
+
   render();
+  consumeHashImport();
 })();
 </script>
 <script>

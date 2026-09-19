@@ -24,15 +24,36 @@ then Settings → Pages → Source: *Deploy from a branch*, branch `main`, folde
 
 ## Importing from Canvas
 
-**Import** takes the `.ics` file from a Canvas calendar feed (Calendar → Calendar
-Feed) and fills in courses, assignment names and due dates. Re-importing later
-matches on each event's `UID`, so items are updated in place — dates move,
-checkmarks and any prep steps you added by hand survive, and nothing duplicates.
+Canvas sends **no CORS headers** on either its REST API or its calendar feed, and
+it 404s on preflight — so no hosted page can fetch from Canvas directly, whatever
+host it sits on. Both import paths work around that by running somewhere Canvas
+already trusts.
 
-Canvas does *not* send CORS headers on either its REST API or its calendar feed,
-so a website cannot fetch from Canvas directly, whatever host it sits on. Reading
-a local file is the way around that. The export carries titles and due dates
-only; readings, videos and problem sets have to be added as prep steps.
+### One click — `bookmarklet.js`
+
+The bookmarklet runs *on the Canvas tab*, where requests are same-origin and the
+user's existing session authenticates them. It pulls active courses, planner
+items for the next 60 days, and the body of every prep page, then opens this site
+with the payload base64'd into the URL **fragment** — which browsers never send to
+the server, so nobody's coursework touches the host.
+
+The page is built into an `href` at runtime by fetching `bookmarklet.js`, so
+improving it never requires anyone to re-drag their bookmark.
+
+Prep-page parsing deliberately lives in `index.html`, not the bookmarklet, for the
+same reason. `parsePrepBody()` reads the shape most Canvas prep pages share — a
+"prepare the following" run, then an "in class" run — and classifies lines into
+Reading / Video / Problem set steps. Professors write these pages freehand, so it
+is heuristic; unmatched lines attach to the step above rather than being dropped.
+
+### Calendar file
+
+The `.ics` from Calendar → Calendar Feed. Titles and due dates only, no prep
+detail, but it needs no bookmark setup.
+
+Both paths match on a stable external id (`UID` for `.ics`, `type-id` for the
+bookmarklet), so re-importing updates items in place: dates move, and checkmarks
+plus any prep steps written by hand survive.
 
 ## Where the data lives
 
